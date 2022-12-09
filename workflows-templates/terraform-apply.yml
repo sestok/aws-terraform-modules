@@ -1,0 +1,57 @@
+name: Terraform Apply
+on:
+  push:
+    branches:
+      - $default-branch
+
+env:
+  TF_VERSION: 1.1
+  TF_VAR_aws-access-key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  TF_VAR_aws-secret-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  TF_VAR_terraform-state-bucket: 's3-terraform-state-files'
+  TF_VAR_terraform-state-bucket-namespace: /
+  TF_VAR_terraform-state-bucket-key: 'aws-env/terraform.tfstate'
+  TF_VAR_terraform-state-bucket-aws-region: 'us-east-1'
+  TF_VAR_terraform-dynamodb-state-locking-table-name: 'dynamodb-terraform-state-files'
+
+jobs:
+  terraform:
+    name: Apply
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: GitHub Auth
+        run:  
+          git config --global url."https://oauth2:${GITHUB_TOKEN}@github.com/<org-name>".insteadOf "https://github.com/<org-name>" 
+        env:  
+          GITHUB_TOKEN: ${{ secrets.GITHUB_PAT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1.2.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Get Update
+        run: terraform get -update
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+          -backend-config="dynamodb_table=${{ env.TF_VAR_terraform-dynamodb-state-locking-table-name }}" \
+          -backend-config="access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+          -backend-config="secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+          -backend-config="bucket=${{ env.TF_VAR_terraform-state-bucket }}" \
+          -backend-config="key=${{ env.TF_VAR_terraform-state-bucket-key }}" \
+          -backend-config="region=${{ env.TF_VAR_terraform-state-bucket-aws-region }}"
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
